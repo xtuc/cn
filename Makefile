@@ -25,7 +25,6 @@ ifneq ("$(shell pwd)","$(GOPATH)/src/github.com/ceph/cn")
 endif
 
 prepare:
-	dep ensure
 	unset GOOS; unset GOARCH; cd cmd; go test -timeout 1m -count 5
 
 darwin:

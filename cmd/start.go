@@ -23,6 +23,7 @@
 package cmd
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"runtime"
@@ -32,6 +33,7 @@ import (
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/go-connections/nat"
+	v1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/spf13/cobra"
 )
 
@@ -129,20 +131,26 @@ func runContainer(cmd *cobra.Command, args []string) {
 		nat.Port(cnBrowserNatPort): {},
 	}
 
-	portBindings := nat.PortMap{
-		nat.Port(rgwNatPort): []nat.PortBinding{
-			{
-				HostIP:   "0.0.0.0",
-				HostPort: rgwPort,
-			},
-		},
-		nat.Port(cnBrowserNatPort): []nat.PortBinding{
-			{
-				HostIP:   "0.0.0.0",
-				HostPort: cnBrowserPort,
-			},
-		},
-	}
+	// portBindings := nat.PortMap{
+	// 	nat.Port(rgwNatPort): []nat.PortBinding{
+	// 		{
+	// 			HostIP:   "0.0.0.0",
+	// 			HostPort: rgwPort,
+	// 		},
+	// 	},
+	// 	nat.Port("3300/tcp"): []nat.PortBinding{
+	// 		{
+	// 			HostIP:   "0.0.0.0",
+	// 			HostPort: "3300",
+	// 		},
+	// 	},
+	// 	nat.Port(cnBrowserNatPort): []nat.PortBinding{
+	// 		{
+	// 			HostIP:   "0.0.0.0",
+	// 			HostPort: cnBrowserPort,
+	// 		},
+	// 	},
+	// }
 
 	ips, _ := getInterfaceIPv4s()
 
@@ -162,6 +170,7 @@ func runContainer(cmd *cobra.Command, args []string) {
 
 	volumeBindings := []string{
 		getWorkDirectory(flavor) + ":" + tempPath,
+		"/tmp/ceph:/etc/ceph/",
 	}
 
 	volumes := map[string]struct{}{
@@ -184,10 +193,10 @@ func runContainer(cmd *cobra.Command, args []string) {
 			}
 			envs = append(envs, "OSD_PATH="+getUnderlyingStorage(flavor))
 			volumeBindings = append(volumeBindings, getUnderlyingStorage(flavor)+":"+getUnderlyingStorage(flavor))
-			if runtime.GOOS == "linux"  {
+			if runtime.GOOS == "linux" {
 				// Add z option while bindmounting directory so that docker can modify SeLinux labels if SeLinux is Enforced.
-				volumeBindings[len(volumeBindings)-1] +=  ":z"
-			} 
+				volumeBindings[len(volumeBindings)-1] += ":z"
+			}
 
 			// Did someone specify a particular size for cn data store in this directory?
 			if len(getSize(flavor)) != 0 {
@@ -195,7 +204,7 @@ func runContainer(cmd *cobra.Command, args []string) {
 				if sizeBluestoreBlockToBytes == 0 {
 					log.Fatal("Wrong unit passed: ", getSize(flavor), ". Please refer to https://en.wikipedia.org/wiki/Byte.")
 				}
-				envs = append(envs, "BLUESTORE_BLOCK_SIZE="+string(sizeBluestoreBlockToBytes))
+				envs = append(envs, "BLUESTORE_BLOCK_SIZE="+fmt.Sprint(sizeBluestoreBlockToBytes))
 			}
 		}
 		if testDev == "blockdev" {
@@ -280,15 +289,19 @@ func runContainer(cmd *cobra.Command, args []string) {
 	}
 
 	hostConfig := &container.HostConfig{
-		PortBindings: portBindings,
-		Binds:        volumeBindings,
-		Resources:    ressources,
-		Privileged:   getPrivileged(flavor),
+		// PortBindings: portBindings,
+		Binds:       volumeBindings,
+		Resources:   ressources,
+		Privileged:  getPrivileged(flavor),
+		NetworkMode: "host",
 	}
 
 	log.Printf("Running cluster %s | image %s | flavor %s {%s Memory, %d CPU} ...", containerNameToShow, getImageName(), flavor, getMemorySize(flavor), ressources.NanoCPUs)
 
-	resp, err := getDocker().ContainerCreate(ctx, config, hostConfig, nil, containerName)
+	resp, err := getDocker().ContainerCreate(ctx, config, hostConfig, nil, &v1.Platform{
+		Architecture: "amd64",
+		OS:           "linux",
+	}, containerName)
 	if err != nil {
 		log.Fatal(err)
 	}
